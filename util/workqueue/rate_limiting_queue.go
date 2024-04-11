@@ -19,24 +19,24 @@ package workqueue
 import "k8s.io/utils/clock"
 
 // RateLimitingInterface is an interface that rate limits items being added to the queue.
-type RateLimitingInterface interface {
-	DelayingInterface
+type RateLimitingInterface[T comparable] interface {
+	DelayingInterface[T]
 
 	// AddRateLimited adds an item to the workqueue after the rate limiter says it's ok
-	AddRateLimited(item interface{})
+	AddRateLimited(item T)
 
 	// Forget indicates that an item is finished being retried.  Doesn't matter whether it's for perm failing
 	// or for success, we'll stop the rate limiter from tracking it.  This only clears the `rateLimiter`, you
 	// still have to call `Done` on the queue.
-	Forget(item interface{})
+	Forget(item T)
 
 	// NumRequeues returns back how many times the item was requeued
-	NumRequeues(item interface{}) int
+	NumRequeues(item T) int
 }
 
 // RateLimitingQueueConfig specifies optional configurations to customize a RateLimitingInterface.
 
-type RateLimitingQueueConfig struct {
+type RateLimitingQueueConfig[T comparable] struct {
 	// Name for the queue. If unnamed, the metrics will not be registered.
 	Name string
 
@@ -48,34 +48,34 @@ type RateLimitingQueueConfig struct {
 	Clock clock.WithTicker
 
 	// DelayingQueue optionally allows injecting custom delaying queue DelayingInterface instead of the default one.
-	DelayingQueue DelayingInterface
+	DelayingQueue DelayingInterface[T]
 }
 
 // NewRateLimitingQueue constructs a new workqueue with rateLimited queuing ability
 // Remember to call Forget!  If you don't, you may end up tracking failures forever.
 // NewRateLimitingQueue does not emit metrics. For use with a MetricsProvider, please use
 // NewRateLimitingQueueWithConfig instead and specify a name.
-func NewRateLimitingQueue(rateLimiter RateLimiter) RateLimitingInterface {
-	return NewRateLimitingQueueWithConfig(rateLimiter, RateLimitingQueueConfig{})
+func NewRateLimitingQueue[T comparable](rateLimiter RateLimiter[T]) RateLimitingInterface[T] {
+	return NewRateLimitingQueueWithConfig(rateLimiter, RateLimitingQueueConfig[T]{})
 }
 
 // NewRateLimitingQueueWithConfig constructs a new workqueue with rateLimited queuing ability
 // with options to customize different properties.
 // Remember to call Forget!  If you don't, you may end up tracking failures forever.
-func NewRateLimitingQueueWithConfig(rateLimiter RateLimiter, config RateLimitingQueueConfig) RateLimitingInterface {
+func NewRateLimitingQueueWithConfig[T comparable](rateLimiter RateLimiter[T], config RateLimitingQueueConfig[T]) RateLimitingInterface[T] {
 	if config.Clock == nil {
 		config.Clock = clock.RealClock{}
 	}
 
 	if config.DelayingQueue == nil {
-		config.DelayingQueue = NewDelayingQueueWithConfig(DelayingQueueConfig{
+		config.DelayingQueue = NewDelayingQueueWithConfig(DelayingQueueConfig[T]{
 			Name:            config.Name,
 			MetricsProvider: config.MetricsProvider,
 			Clock:           config.Clock,
 		})
 	}
 
-	return &rateLimitingType{
+	return &rateLimitingType[T]{
 		DelayingInterface: config.DelayingQueue,
 		rateLimiter:       rateLimiter,
 	}
@@ -83,8 +83,8 @@ func NewRateLimitingQueueWithConfig(rateLimiter RateLimiter, config RateLimiting
 
 // NewNamedRateLimitingQueue constructs a new named workqueue with rateLimited queuing ability.
 // Deprecated: Use NewRateLimitingQueueWithConfig instead.
-func NewNamedRateLimitingQueue(rateLimiter RateLimiter, name string) RateLimitingInterface {
-	return NewRateLimitingQueueWithConfig(rateLimiter, RateLimitingQueueConfig{
+func NewNamedRateLimitingQueue[T comparable](rateLimiter RateLimiter[T], name string) RateLimitingInterface[T] {
+	return NewRateLimitingQueueWithConfig(rateLimiter, RateLimitingQueueConfig[T]{
 		Name: name,
 	})
 }
@@ -92,28 +92,28 @@ func NewNamedRateLimitingQueue(rateLimiter RateLimiter, name string) RateLimitin
 // NewRateLimitingQueueWithDelayingInterface constructs a new named workqueue with rateLimited queuing ability
 // with the option to inject a custom delaying queue instead of the default one.
 // Deprecated: Use NewRateLimitingQueueWithConfig instead.
-func NewRateLimitingQueueWithDelayingInterface(di DelayingInterface, rateLimiter RateLimiter) RateLimitingInterface {
-	return NewRateLimitingQueueWithConfig(rateLimiter, RateLimitingQueueConfig{
+func NewRateLimitingQueueWithDelayingInterface[T comparable](di DelayingInterface[T], rateLimiter RateLimiter[T]) RateLimitingInterface[T] {
+	return NewRateLimitingQueueWithConfig(rateLimiter, RateLimitingQueueConfig[T]{
 		DelayingQueue: di,
 	})
 }
 
 // rateLimitingType wraps an Interface and provides rateLimited re-enquing
-type rateLimitingType struct {
-	DelayingInterface
+type rateLimitingType[T comparable] struct {
+	DelayingInterface[T]
 
-	rateLimiter RateLimiter
+	rateLimiter RateLimiter[T]
 }
 
 // AddRateLimited AddAfter's the item based on the time when the rate limiter says it's ok
-func (q *rateLimitingType) AddRateLimited(item interface{}) {
+func (q *rateLimitingType[T]) AddRateLimited(item T) {
 	q.DelayingInterface.AddAfter(item, q.rateLimiter.When(item))
 }
 
-func (q *rateLimitingType) NumRequeues(item interface{}) int {
+func (q *rateLimitingType[T]) NumRequeues(item T) int {
 	return q.rateLimiter.NumRequeues(item)
 }
 
-func (q *rateLimitingType) Forget(item interface{}) {
+func (q *rateLimitingType[T]) Forget(item T) {
 	q.rateLimiter.Forget(item)
 }

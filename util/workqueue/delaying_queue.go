@@ -27,14 +27,14 @@ import (
 
 // DelayingInterface is an Interface that can Add an item at a later time. This makes it easier to
 // requeue items after failures without ending up in a hot-loop.
-type DelayingInterface interface {
-	Interface
+type DelayingInterface[T comparable] interface {
+	Interface[T]
 	// AddAfter adds an item to the workqueue after the indicated duration has passed
-	AddAfter(item interface{}, duration time.Duration)
+	AddAfter(item T, duration time.Duration)
 }
 
 // DelayingQueueConfig specifies optional configurations to customize a DelayingInterface.
-type DelayingQueueConfig struct {
+type DelayingQueueConfig[T comparable] struct {
 	// Name for the queue. If unnamed, the metrics will not be registered.
 	Name string
 
@@ -46,39 +46,39 @@ type DelayingQueueConfig struct {
 	Clock clock.WithTicker
 
 	// Queue optionally allows injecting custom queue Interface instead of the default one.
-	Queue Interface
+	Queue Interface[T]
 }
 
 // NewDelayingQueue constructs a new workqueue with delayed queuing ability.
 // NewDelayingQueue does not emit metrics. For use with a MetricsProvider, please use
 // NewDelayingQueueWithConfig instead and specify a name.
-func NewDelayingQueue() DelayingInterface {
-	return NewDelayingQueueWithConfig(DelayingQueueConfig{})
+func NewDelayingQueue[T comparable]() DelayingInterface[T] {
+	return NewDelayingQueueWithConfig[T](DelayingQueueConfig[T]{})
 }
 
 // NewDelayingQueueWithConfig constructs a new workqueue with options to
 // customize different properties.
-func NewDelayingQueueWithConfig(config DelayingQueueConfig) DelayingInterface {
+func NewDelayingQueueWithConfig[T comparable](config DelayingQueueConfig[T]) DelayingInterface[T] {
 	if config.Clock == nil {
 		config.Clock = clock.RealClock{}
 	}
 
 	if config.Queue == nil {
-		config.Queue = NewWithConfig(QueueConfig{
+		config.Queue = NewWithConfig[T](QueueConfig{
 			Name:            config.Name,
 			MetricsProvider: config.MetricsProvider,
 			Clock:           config.Clock,
 		})
 	}
 
-	return newDelayingQueue(config.Clock, config.Queue, config.Name, config.MetricsProvider)
+	return newDelayingQueue[T](config.Clock, config.Queue, config.Name, config.MetricsProvider)
 }
 
 // NewDelayingQueueWithCustomQueue constructs a new workqueue with ability to
 // inject custom queue Interface instead of the default one
 // Deprecated: Use NewDelayingQueueWithConfig instead.
-func NewDelayingQueueWithCustomQueue(q Interface, name string) DelayingInterface {
-	return NewDelayingQueueWithConfig(DelayingQueueConfig{
+func NewDelayingQueueWithCustomQueue[T comparable](q Interface[T], name string) DelayingInterface[T] {
+	return NewDelayingQueueWithConfig[T](DelayingQueueConfig[T]{
 		Name:  name,
 		Queue: q,
 	})
@@ -86,27 +86,27 @@ func NewDelayingQueueWithCustomQueue(q Interface, name string) DelayingInterface
 
 // NewNamedDelayingQueue constructs a new named workqueue with delayed queuing ability.
 // Deprecated: Use NewDelayingQueueWithConfig instead.
-func NewNamedDelayingQueue(name string) DelayingInterface {
-	return NewDelayingQueueWithConfig(DelayingQueueConfig{Name: name})
+func NewNamedDelayingQueue[T comparable](name string) DelayingInterface[T] {
+	return NewDelayingQueueWithConfig(DelayingQueueConfig[T]{Name: name})
 }
 
 // NewDelayingQueueWithCustomClock constructs a new named workqueue
 // with ability to inject real or fake clock for testing purposes.
 // Deprecated: Use NewDelayingQueueWithConfig instead.
-func NewDelayingQueueWithCustomClock(clock clock.WithTicker, name string) DelayingInterface {
-	return NewDelayingQueueWithConfig(DelayingQueueConfig{
+func NewDelayingQueueWithCustomClock[T comparable](clock clock.WithTicker, name string) DelayingInterface[T] {
+	return NewDelayingQueueWithConfig(DelayingQueueConfig[T]{
 		Name:  name,
 		Clock: clock,
 	})
 }
 
-func newDelayingQueue(clock clock.WithTicker, q Interface, name string, provider MetricsProvider) *delayingType {
-	ret := &delayingType{
+func newDelayingQueue[T comparable](clock clock.WithTicker, q Interface[T], name string, provider MetricsProvider) *delayingType[T] {
+	ret := &delayingType[T]{
 		Interface:       q,
 		clock:           clock,
 		heartbeat:       clock.NewTicker(maxWait),
 		stopCh:          make(chan struct{}),
-		waitingForAddCh: make(chan *waitFor, 1000),
+		waitingForAddCh: make(chan *waitFor[T], 1000),
 		metrics:         newRetryMetrics(name, provider),
 	}
 
@@ -115,8 +115,8 @@ func newDelayingQueue(clock clock.WithTicker, q Interface, name string, provider
 }
 
 // delayingType wraps an Interface and provides delayed re-enquing
-type delayingType struct {
-	Interface
+type delayingType[T comparable] struct {
+	Interface[T]
 
 	// clock tracks time for delayed firing
 	clock clock.Clock
@@ -130,15 +130,15 @@ type delayingType struct {
 	heartbeat clock.Ticker
 
 	// waitingForAddCh is a buffered channel that feeds waitingForAdd
-	waitingForAddCh chan *waitFor
+	waitingForAddCh chan *waitFor[T]
 
 	// metrics counts the number of retries
 	metrics retryMetrics
 }
 
 // waitFor holds the data to add and the time it should be added
-type waitFor struct {
-	data    t
+type waitFor[T any] struct {
+	data    T
 	readyAt time.Time
 	// index in the priority queue (heap)
 	index int
@@ -152,15 +152,15 @@ type waitFor struct {
 // it has been removed from the queue and placed at index Len()-1 by
 // container/heap. Push adds an item at index Len(), and container/heap
 // percolates it into the correct location.
-type waitForPriorityQueue []*waitFor
+type waitForPriorityQueue[T any] []*waitFor[T]
 
-func (pq waitForPriorityQueue) Len() int {
+func (pq waitForPriorityQueue[T]) Len() int {
 	return len(pq)
 }
-func (pq waitForPriorityQueue) Less(i, j int) bool {
+func (pq waitForPriorityQueue[T]) Less(i, j int) bool {
 	return pq[i].readyAt.Before(pq[j].readyAt)
 }
-func (pq waitForPriorityQueue) Swap(i, j int) {
+func (pq waitForPriorityQueue[T]) Swap(i, j int) {
 	pq[i], pq[j] = pq[j], pq[i]
 	pq[i].index = i
 	pq[j].index = j
@@ -168,16 +168,16 @@ func (pq waitForPriorityQueue) Swap(i, j int) {
 
 // Push adds an item to the queue. Push should not be called directly; instead,
 // use `heap.Push`.
-func (pq *waitForPriorityQueue) Push(x interface{}) {
+func (pq *waitForPriorityQueue[T]) Push(x interface{}) {
 	n := len(*pq)
-	item := x.(*waitFor)
+	item := x.(*waitFor[T])
 	item.index = n
 	*pq = append(*pq, item)
 }
 
 // Pop removes an item from the queue. Pop should not be called directly;
 // instead, use `heap.Pop`.
-func (pq *waitForPriorityQueue) Pop() interface{} {
+func (pq *waitForPriorityQueue[T]) Pop() interface{} {
 	n := len(*pq)
 	item := (*pq)[n-1]
 	item.index = -1
@@ -187,13 +187,13 @@ func (pq *waitForPriorityQueue) Pop() interface{} {
 
 // Peek returns the item at the beginning of the queue, without removing the
 // item or otherwise mutating the queue. It is safe to call directly.
-func (pq waitForPriorityQueue) Peek() interface{} {
+func (pq waitForPriorityQueue[T]) Peek() interface{} {
 	return pq[0]
 }
 
 // ShutDown stops the queue. After the queue drains, the returned shutdown bool
 // on Get() will be true. This method may be invoked more than once.
-func (q *delayingType) ShutDown() {
+func (q *delayingType[T]) ShutDown() {
 	q.stopOnce.Do(func() {
 		q.Interface.ShutDown()
 		close(q.stopCh)
@@ -202,7 +202,7 @@ func (q *delayingType) ShutDown() {
 }
 
 // AddAfter adds the given item to the work queue after the given delay
-func (q *delayingType) AddAfter(item interface{}, duration time.Duration) {
+func (q *delayingType[T]) AddAfter(item T, duration time.Duration) {
 	// don't add if we're already shutting down
 	if q.ShuttingDown() {
 		return
@@ -219,7 +219,7 @@ func (q *delayingType) AddAfter(item interface{}, duration time.Duration) {
 	select {
 	case <-q.stopCh:
 		// unblock if ShutDown() is called
-	case q.waitingForAddCh <- &waitFor{data: item, readyAt: q.clock.Now().Add(duration)}:
+	case q.waitingForAddCh <- &waitFor[T]{data: item, readyAt: q.clock.Now().Add(duration)}:
 	}
 }
 
@@ -229,7 +229,7 @@ func (q *delayingType) AddAfter(item interface{}, duration time.Duration) {
 const maxWait = 10 * time.Second
 
 // waitingLoop runs until the workqueue is shutdown and keeps a check on the list of items to be added.
-func (q *delayingType) waitingLoop() {
+func (q *delayingType[T]) waitingLoop() {
 	defer utilruntime.HandleCrash()
 
 	// Make a placeholder channel to use when there are no items in our list
@@ -238,10 +238,10 @@ func (q *delayingType) waitingLoop() {
 	// Make a timer that expires when the item at the head of the waiting queue is ready
 	var nextReadyAtTimer clock.Timer
 
-	waitingForQueue := &waitForPriorityQueue{}
+	waitingForQueue := &waitForPriorityQueue[T]{}
 	heap.Init(waitingForQueue)
 
-	waitingEntryByData := map[t]*waitFor{}
+	waitingEntryByData := map[t]*waitFor[T]{}
 
 	for {
 		if q.Interface.ShuttingDown() {
@@ -252,12 +252,12 @@ func (q *delayingType) waitingLoop() {
 
 		// Add ready entries
 		for waitingForQueue.Len() > 0 {
-			entry := waitingForQueue.Peek().(*waitFor)
+			entry := waitingForQueue.Peek().(*waitFor[T])
 			if entry.readyAt.After(now) {
 				break
 			}
 
-			entry = heap.Pop(waitingForQueue).(*waitFor)
+			entry = heap.Pop(waitingForQueue).(*waitFor[T])
 			q.Add(entry.data)
 			delete(waitingEntryByData, entry.data)
 		}
@@ -268,7 +268,7 @@ func (q *delayingType) waitingLoop() {
 			if nextReadyAtTimer != nil {
 				nextReadyAtTimer.Stop()
 			}
-			entry := waitingForQueue.Peek().(*waitFor)
+			entry := waitingForQueue.Peek().(*waitFor[T])
 			nextReadyAtTimer = q.clock.NewTimer(entry.readyAt.Sub(now))
 			nextReadyAt = nextReadyAtTimer.C()
 		}
@@ -308,7 +308,7 @@ func (q *delayingType) waitingLoop() {
 }
 
 // insert adds the entry to the priority queue, or updates the readyAt if it already exists in the queue
-func insert(q *waitForPriorityQueue, knownEntries map[t]*waitFor, entry *waitFor) {
+func insert[T comparable](q *waitForPriorityQueue[T], knownEntries map[t]*waitFor[T], entry *waitFor[T]) {
 	// if the entry already exists, update the time only if it would cause the item to be queued sooner
 	existing, exists := knownEntries[entry.data]
 	if exists {

@@ -22,7 +22,7 @@ import (
 )
 
 func TestItemExponentialFailureRateLimiter(t *testing.T) {
-	limiter := NewItemExponentialFailureRateLimiter(1*time.Millisecond, 1*time.Second)
+	limiter := NewItemExponentialFailureRateLimiter[any](1*time.Millisecond, 1*time.Second)
 
 	if e, a := 1*time.Millisecond, limiter.When("one"); e != a {
 		t.Errorf("expected %v, got %v", e, a)
@@ -64,7 +64,7 @@ func TestItemExponentialFailureRateLimiter(t *testing.T) {
 }
 
 func TestItemExponentialFailureRateLimiterOverFlow(t *testing.T) {
-	limiter := NewItemExponentialFailureRateLimiter(1*time.Millisecond, 1000*time.Second)
+	limiter := NewItemExponentialFailureRateLimiter[any](1*time.Millisecond, 1000*time.Second)
 	for i := 0; i < 5; i++ {
 		limiter.When("one")
 	}
@@ -79,7 +79,7 @@ func TestItemExponentialFailureRateLimiterOverFlow(t *testing.T) {
 		t.Errorf("expected %v, got %v", e, a)
 	}
 
-	limiter = NewItemExponentialFailureRateLimiter(1*time.Minute, 1000*time.Hour)
+	limiter = NewItemExponentialFailureRateLimiter[any](1*time.Minute, 1000*time.Hour)
 	for i := 0; i < 2; i++ {
 		limiter.When("two")
 	}
@@ -97,7 +97,7 @@ func TestItemExponentialFailureRateLimiterOverFlow(t *testing.T) {
 }
 
 func TestItemFastSlowRateLimiter(t *testing.T) {
-	limiter := NewItemFastSlowRateLimiter(5*time.Millisecond, 10*time.Second, 3)
+	limiter := NewItemFastSlowRateLimiter[any](5*time.Millisecond, 10*time.Second, 3)
 
 	if e, a := 5*time.Millisecond, limiter.When("one"); e != a {
 		t.Errorf("expected %v, got %v", e, a)
@@ -140,8 +140,8 @@ func TestItemFastSlowRateLimiter(t *testing.T) {
 
 func TestMaxOfRateLimiter(t *testing.T) {
 	limiter := NewMaxOfRateLimiter(
-		NewItemFastSlowRateLimiter(5*time.Millisecond, 3*time.Second, 3),
-		NewItemExponentialFailureRateLimiter(1*time.Millisecond, 1*time.Second),
+		NewItemFastSlowRateLimiter[any](5*time.Millisecond, 3*time.Second, 3),
+		NewItemExponentialFailureRateLimiter[any](1*time.Millisecond, 1*time.Second),
 	)
 
 	if e, a := 5*time.Millisecond, limiter.When("one"); e != a {
@@ -184,7 +184,7 @@ func TestMaxOfRateLimiter(t *testing.T) {
 }
 
 func TestWithMaxWaitRateLimiter(t *testing.T) {
-	limiter := NewWithMaxWaitRateLimiter(NewStepRateLimiter(5*time.Millisecond, 1000*time.Second, 100), 500*time.Second)
+	limiter := NewWithMaxWaitRateLimiter(NewStepRateLimiter[any](5*time.Millisecond, 1000*time.Second, 100), 500*time.Second)
 	for i := 0; i < 100; i++ {
 		if e, a := 5*time.Millisecond, limiter.When(i); e != a {
 			t.Errorf("expected %v, got %v ", e, a)
@@ -198,24 +198,24 @@ func TestWithMaxWaitRateLimiter(t *testing.T) {
 	}
 }
 
-var _ RateLimiter = &StepRateLimiter{}
+var _ RateLimiter[any] = &StepRateLimiter[any]{}
 
-func NewStepRateLimiter(baseDelay time.Duration, maxDelay time.Duration, threshold int) RateLimiter {
-	return &StepRateLimiter{
+func NewStepRateLimiter[T comparable](baseDelay time.Duration, maxDelay time.Duration, threshold int) RateLimiter[T] {
+	return &StepRateLimiter[T]{
 		baseDelay: baseDelay,
 		maxDelay:  maxDelay,
 		threshold: threshold,
 	}
 }
 
-type StepRateLimiter struct {
+type StepRateLimiter[T comparable] struct {
 	count     int
 	threshold int
 	baseDelay time.Duration
 	maxDelay  time.Duration
 }
 
-func (r *StepRateLimiter) When(item interface{}) time.Duration {
+func (r *StepRateLimiter[T]) When(item T) time.Duration {
 	r.count += 1
 	if r.count <= r.threshold {
 		return r.baseDelay
@@ -223,9 +223,9 @@ func (r *StepRateLimiter) When(item interface{}) time.Duration {
 	return r.maxDelay
 }
 
-func (r *StepRateLimiter) NumRequeues(item interface{}) int {
+func (r *StepRateLimiter[T]) NumRequeues(item T) int {
 	return 0
 }
 
-func (r *StepRateLimiter) Forget(item interface{}) {
+func (r *StepRateLimiter[T]) Forget(item T) {
 }

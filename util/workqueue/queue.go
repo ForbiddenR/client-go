@@ -23,11 +23,11 @@ import (
 	"k8s.io/utils/clock"
 )
 
-type Interface interface {
-	Add(item interface{})
+type Interface[T comparable] interface {
+	Add(item T)
 	Len() int
-	Get() (item interface{}, shutdown bool)
-	Done(item interface{})
+	Get() (item T, shutdown bool)
+	Done(item T)
 	ShutDown()
 	ShutDownWithDrain()
 	ShuttingDown() bool
@@ -47,29 +47,29 @@ type QueueConfig struct {
 }
 
 // New constructs a new work queue (see the package comment).
-func New() *Type {
-	return NewWithConfig(QueueConfig{
+func New[T comparable]() *Type[T] {
+	return NewWithConfig[T](QueueConfig{
 		Name: "",
 	})
 }
 
 // NewWithConfig constructs a new workqueue with ability to
 // customize different properties.
-func NewWithConfig(config QueueConfig) *Type {
-	return newQueueWithConfig(config, defaultUnfinishedWorkUpdatePeriod)
+func NewWithConfig[T comparable](config QueueConfig) *Type[T] {
+	return newQueueWithConfig[T](config, defaultUnfinishedWorkUpdatePeriod)
 }
 
 // NewNamed creates a new named queue.
 // Deprecated: Use NewWithConfig instead.
-func NewNamed(name string) *Type {
-	return NewWithConfig(QueueConfig{
+func NewNamed[T comparable](name string) *Type[T] {
+	return NewWithConfig[T](QueueConfig{
 		Name: name,
 	})
 }
 
 // newQueueWithConfig constructs a new named workqueue
 // with the ability to customize different properties for testing purposes
-func newQueueWithConfig(config QueueConfig, updatePeriod time.Duration) *Type {
+func newQueueWithConfig[T comparable](config QueueConfig, updatePeriod time.Duration) *Type[T] {
 	var metricsFactory *queueMetricsFactory
 	if config.MetricsProvider != nil {
 		metricsFactory = &queueMetricsFactory{
@@ -83,18 +83,18 @@ func newQueueWithConfig(config QueueConfig, updatePeriod time.Duration) *Type {
 		config.Clock = clock.RealClock{}
 	}
 
-	return newQueue(
+	return newQueue[T](
 		config.Clock,
 		metricsFactory.newQueueMetrics(config.Name, config.Clock),
 		updatePeriod,
 	)
 }
 
-func newQueue(c clock.WithTicker, metrics queueMetrics, updatePeriod time.Duration) *Type {
-	t := &Type{
+func newQueue[T comparable](c clock.WithTicker, metrics queueMetrics, updatePeriod time.Duration) *Type[T] {
+	t := &Type[T]{
 		clock:                      c,
-		dirty:                      set{},
-		processing:                 set{},
+		dirty:                      set[T]{},
+		processing:                 set[T]{},
 		cond:                       sync.NewCond(&sync.Mutex{}),
 		metrics:                    metrics,
 		unfinishedWorkUpdatePeriod: updatePeriod,
@@ -112,20 +112,20 @@ func newQueue(c clock.WithTicker, metrics queueMetrics, updatePeriod time.Durati
 const defaultUnfinishedWorkUpdatePeriod = 500 * time.Millisecond
 
 // Type is a work queue (see the package comment).
-type Type struct {
+type Type[T comparable] struct {
 	// queue defines the order in which we will work on items. Every
 	// element of queue should be in the dirty set and not in the
 	// processing set.
-	queue []t
+	queue []T
 
 	// dirty defines all of the items that need to be processed.
-	dirty set
+	dirty set[T]
 
 	// Things that are currently being processed are in the processing set.
 	// These things may be simultaneously in the dirty set. When we finish
 	// processing something and remove it from this set, we'll check if
 	// it's in the dirty set, and if so, add it to the queue.
-	processing set
+	processing set[T]
 
 	cond *sync.Cond
 
@@ -140,27 +140,27 @@ type Type struct {
 
 type empty struct{}
 type t interface{}
-type set map[t]empty
+type set[T comparable] map[T]empty
 
-func (s set) has(item t) bool {
+func (s set[T]) has(item T) bool {
 	_, exists := s[item]
 	return exists
 }
 
-func (s set) insert(item t) {
+func (s set[T]) insert(item T) {
 	s[item] = empty{}
 }
 
-func (s set) delete(item t) {
+func (s set[T]) delete(item T) {
 	delete(s, item)
 }
 
-func (s set) len() int {
+func (s set[T]) len() int {
 	return len(s)
 }
 
 // Add marks item as needing processing.
-func (q *Type) Add(item interface{}) {
+func (q *Type[T]) Add(item T) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 	if q.shuttingDown {
@@ -184,7 +184,7 @@ func (q *Type) Add(item interface{}) {
 // Len returns the current queue length, for informational purposes only. You
 // shouldn't e.g. gate a call to Add() or Get() on Len() being a particular
 // value, that can't be synchronized properly.
-func (q *Type) Len() int {
+func (q *Type[T]) Len() int {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 	return len(q.queue)
@@ -193,7 +193,7 @@ func (q *Type) Len() int {
 // Get blocks until it can return an item to be processed. If shutdown = true,
 // the caller should end their goroutine. You must call Done with item when you
 // have finished processing it.
-func (q *Type) Get() (item interface{}, shutdown bool) {
+func (q *Type[T]) Get() (item T, shutdown bool) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 	for len(q.queue) == 0 && !q.shuttingDown {
@@ -201,12 +201,13 @@ func (q *Type) Get() (item interface{}, shutdown bool) {
 	}
 	if len(q.queue) == 0 {
 		// We must be shutting down.
-		return nil, true
+		return item, true
 	}
 
+	var empty T
 	item = q.queue[0]
 	// The underlying array still exists and reference this object, so the object will not be garbage collected.
-	q.queue[0] = nil
+	q.queue[0] = empty
 	q.queue = q.queue[1:]
 
 	q.metrics.get(item)
@@ -220,7 +221,7 @@ func (q *Type) Get() (item interface{}, shutdown bool) {
 // Done marks item as done processing, and if it has been marked as dirty again
 // while it was being processed, it will be re-added to the queue for
 // re-processing.
-func (q *Type) Done(item interface{}) {
+func (q *Type[T]) Done(item T) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
@@ -237,7 +238,7 @@ func (q *Type) Done(item interface{}) {
 
 // ShutDown will cause q to ignore all new items added to it and
 // immediately instruct the worker goroutines to exit.
-func (q *Type) ShutDown() {
+func (q *Type[T]) ShutDown() {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
@@ -255,7 +256,7 @@ func (q *Type) ShutDown() {
 // indefinitely. It is, however, safe to call ShutDown after having called
 // ShutDownWithDrain, as to force the queue shut down to terminate immediately
 // without waiting for the drainage.
-func (q *Type) ShutDownWithDrain() {
+func (q *Type[T]) ShutDownWithDrain() {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
@@ -268,14 +269,14 @@ func (q *Type) ShutDownWithDrain() {
 	}
 }
 
-func (q *Type) ShuttingDown() bool {
+func (q *Type[T]) ShuttingDown() bool {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
 	return q.shuttingDown
 }
 
-func (q *Type) updateUnfinishedWorkLoop() {
+func (q *Type[T]) updateUnfinishedWorkLoop() {
 	t := q.clock.NewTicker(q.unfinishedWorkUpdatePeriod)
 	defer t.Stop()
 	for range t.C() {

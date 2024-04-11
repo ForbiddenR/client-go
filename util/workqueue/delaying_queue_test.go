@@ -29,7 +29,7 @@ import (
 
 func TestSimpleQueue(t *testing.T) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
-	q := NewDelayingQueueWithConfig(DelayingQueueConfig{Clock: fakeClock})
+	q := NewDelayingQueueWithConfig(DelayingQueueConfig[any]{Clock: fakeClock})
 
 	first := "foo"
 
@@ -71,7 +71,7 @@ func TestSimpleQueue(t *testing.T) {
 
 func TestDeduping(t *testing.T) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
-	q := NewDelayingQueueWithConfig(DelayingQueueConfig{Clock: fakeClock})
+	q := NewDelayingQueueWithConfig(DelayingQueueConfig[any]{Clock: fakeClock})
 
 	first := "foo"
 
@@ -127,7 +127,7 @@ func TestDeduping(t *testing.T) {
 
 func TestAddTwoFireEarly(t *testing.T) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
-	q := NewDelayingQueueWithConfig(DelayingQueueConfig{Clock: fakeClock})
+	q := NewDelayingQueueWithConfig(DelayingQueueConfig[any]{Clock: fakeClock})
 
 	first := "foo"
 	second := "bar"
@@ -176,7 +176,7 @@ func TestAddTwoFireEarly(t *testing.T) {
 
 func TestCopyShifting(t *testing.T) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
-	q := NewDelayingQueueWithConfig(DelayingQueueConfig{Clock: fakeClock})
+	q := NewDelayingQueueWithConfig(DelayingQueueConfig[any]{Clock: fakeClock})
 
 	first := "foo"
 	second := "bar"
@@ -214,7 +214,7 @@ func TestCopyShifting(t *testing.T) {
 
 func BenchmarkDelayingQueue_AddAfter(b *testing.B) {
 	fakeClock := testingclock.NewFakeClock(time.Now())
-	q := NewDelayingQueueWithConfig(DelayingQueueConfig{Clock: fakeClock})
+	q := NewDelayingQueueWithConfig(DelayingQueueConfig[any]{Clock: fakeClock})
 
 	// Add items
 	for n := 0; n < b.N; n++ {
@@ -229,7 +229,7 @@ func BenchmarkDelayingQueue_AddAfter(b *testing.B) {
 	}
 }
 
-func waitForAdded(q DelayingInterface, depth int) error {
+func waitForAdded[T comparable](q DelayingInterface[T], depth int) error {
 	return wait.Poll(1*time.Millisecond, 10*time.Second, func() (done bool, err error) {
 		if q.Len() == depth {
 			return true, nil
@@ -239,9 +239,9 @@ func waitForAdded(q DelayingInterface, depth int) error {
 	})
 }
 
-func waitForWaitingQueueToFill(q DelayingInterface) error {
+func waitForWaitingQueueToFill[T comparable](q DelayingInterface[T]) error {
 	return wait.Poll(1*time.Millisecond, 10*time.Second, func() (done bool, err error) {
-		if len(q.(*delayingType).waitingForAddCh) == 0 {
+		if len(q.(*delayingType[T]).waitingForAddCh) == 0 {
 			return true, nil
 		}
 
